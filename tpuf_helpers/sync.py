@@ -52,7 +52,7 @@ def no_op_enrich(batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def upsert_all(
     ns,
-    batches: Iterable[dict[str, Any]],
+    documents: Iterable[dict[str, Any]],
     batch_size: int,
     *,
     predicate: Callable[[list[dict[str, Any]]], bool] | None = None,
@@ -61,6 +61,7 @@ def upsert_all(
     ] = no_op_enrich,
     force: bool = False,
     show_progress: bool = False,
+    progress_total: int | None = None,
     schema: Mapping[str, Any],
     distance_metric: DistanceMetric = "cosine_distance",
 ) -> None:
@@ -82,11 +83,11 @@ def upsert_all(
         except ImportError:
             pass
         else:
-            progress = tqdm()
+            progress = tqdm(total=progress_total)
 
-    documents = iter(batches)
+    document_iter = iter(documents)
     try:
-        while batch := list(islice(documents, batch_size)):
+        while batch := list(islice(document_iter, batch_size)):
             should_upsert = (
                 predicate(batch)
                 if predicate is not None

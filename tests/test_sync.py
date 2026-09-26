@@ -157,7 +157,8 @@ def test_upsert_all_force_drops_existing_documents(test_namespace, test_docs):
 
 def test_upsert_all_progress_advances_for_skipped_batches(monkeypatch):
     class FakeProgress:
-        def __init__(self):
+        def __init__(self, total):
+            self.total = total
             self.updates = []
             self.closed = False
 
@@ -167,9 +168,15 @@ def test_upsert_all_progress_advances_for_skipped_batches(monkeypatch):
         def close(self):
             self.closed = True
 
-    progress = FakeProgress()
+    progress_bars = []
+
+    def create_progress(total=None):
+        progress = FakeProgress(total)
+        progress_bars.append(progress)
+        return progress
+
     tqdm_module = ModuleType("tqdm")
-    setattr(tqdm_module, "tqdm", lambda: progress)
+    setattr(tqdm_module, "tqdm", create_progress)
     monkeypatch.setitem(sys.modules, "tqdm", tqdm_module)
 
     upsert_all(
@@ -183,9 +190,12 @@ def test_upsert_all_progress_advances_for_skipped_batches(monkeypatch):
         batch_size=2,
         predicate=lambda batch: False,
         show_progress=True,
+        progress_total=4,
         schema={},
     )
 
+    progress = progress_bars[0]
+    assert progress.total == 4
     assert progress.updates == [2, 2]
     assert progress.closed
 

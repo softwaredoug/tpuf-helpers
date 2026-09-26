@@ -1,6 +1,9 @@
+import sys
+from types import ModuleType
+
 import pytest
 
-from tpuf_helpers.async_helpers import count, drop, exists, fetch
+from tpuf_helpers.async_helpers import count, drop, exists, fetch, upsert_all
 
 
 @pytest.mark.asyncio
@@ -32,3 +35,199 @@ async def test_async_fetch_and_exists_for_missing_document(
 
     assert await fetch(async_namespace, "missing") is None
     assert not await exists(async_namespace, "missing")
+
+
+@pytest.mark.asyncio
+async def test_async_upsert_all_batches_documents(async_namespace, test_docs):
+    documents = [
+        {**test_docs[0], "vector": [0.1, 0.2]},
+        {**test_docs[1], "vector": [0.2, 0.3]},
+    ]
+
+    await upsert_all(
+        async_namespace,
+        iter(documents),
+        batch_size=2,
+        schema={"text": {"type": "string"}},
+    )
+
+    assert await count(async_namespace) == len(test_docs)
+
+
+@pytest.mark.asyncio
+async def test_async_upsert_all_skips_batch_when_first_document_exists(
+    async_namespace, test_docs
+):
+    await async_namespace.write(
+        upsert_rows=[{**test_docs[0], "vector": [0.1, 0.2]}],
+        distance_metric="cosine_distance",
+        schema={"text": {"type": "string"}},
+    )
+    changed_doc = {
+        "id": "doc-1", "text": "should be skipped", "vector": [0.3, 0.4]
+    }
+
+    await upsert_all(
+        async_namespace,
+        iter([changed_doc]),
+        batch_size=1,
+        schema={"text": {"type": "string"}},
+    )
+
+    document = await fetch(async_namespace, "doc-1")
+    assert document is not None
+    assert document["text"] == "first test document"
+
+
+@pytest.mark.asyncio
+async def test_async_upsert_all_applies_predicate(async_namespace):
+    documents = [
+        {
+            "id": "doc-3",
+            "text": "selected by predicate",
+            "vector": [0.4, 0.5],
+        },
+        {
+            "id": "doc-4",
+            "text": "skipped by predicate",
+            "vector": [0.5, 0.6],
+        },
+    ]
+
+    await upsert_all(
+        async_namespace,
+        iter(documents),
+        batch_size=1,
+        predicate=lambda batch: batch[0]["id"] == "doc-3",
+        schema={"text": {"type": "string"}},
+    )
+
+    assert await exists(async_namespace, "doc-3")
+    assert not await exists(async_namespace, "doc-4")
+
+
+@pytest.mark.asyncio
+async def test_async_upsert_all_enriches_only_selected_batches(async_namespace):
+    documents = [
+        {
+            "id": "doc-3",
+            "text": "selected by predicate",
+            "vector": [0.4, 0.5],
+        },
+        {
+            "id": "doc-4",
+            "text": "skipped by predicate",
+            "vector": [0.5, 0.6],
+        },
+    ]
+    enriched_ids = []
+
+    def enrich(batch):
+        enriched_ids.extend(doc["id"] for doc in batch)
+        return [{**doc, "text": f'{doc["text"]} (enriched)'} for doc in batch]
+
+    await upsert_all(
+        async_namespace,
+        iter(documents),
+        batch_size=1,
+        predicate=lambda batch: batch[0]["id"] == "doc-3",
+        enrich_fn=enrich,
+        schema={"text": {"type": "string"}},
+    )
+
+    assert enriched_ids == ["doc-3"]
+    enriched_doc = await fetch(async_namespace, "doc-3")
+    assert enriched_doc is not None
+    assert enriched_doc["text"] == "selected by predicate (enriched)"
+    assert not await exists(async_namespace, "doc-4")
+
+
+@pytest.mark.asyncio
+async def test_async_upsert_all_force_drops_existing_documents(
+    async_namespace, test_docs
+):
+    await async_namespace.write(
+        upsert_rows=[{**test_docs[0], "vector": [0.1, 0.2]}],
+        distance_metric="cosine_distance",
+        schema={"text": {"type": "string"}},
+    )
+    forced_doc = {
+        "id": "doc-5", "text": "after force drop", "vector": [0.6, 0.7]
+    }
+
+    await upsert_all(
+        async_namespace,
+        iter([forced_doc]),
+        batch_size=1,
+        force=True,
+        schema={"text": {"type": "string"}},
+    )
+
+    assert await count(async_namespace) == 1
+    assert not await exists(async_namespace, "doc-1")
+    document = await fetch(async_namespace, "doc-5")
+    assert document is not None
+    assert document["text"] == "after force drop"
+
+
+@pytest.mark.asyncio
+async def test_async_upsert_all_progress_advances_for_skipped_batches(monkeypatch):
+    class FakeProgress:
+        def __init__(self, total):
+            self.total = total
+            self.updates = []
+            self.closed = False
+
+        def update(self, amount):
+            self.updates.append(amount)
+
+        def close(self):
+            self.closed = True
+
+    progress_bars = []
+
+    def create_progress(total=None):
+        progress = FakeProgress(total)
+        progress_bars.append(progress)
+        return progress
+
+    tqdm_module = ModuleType("tqdm")
+    setattr(tqdm_module, "tqdm", create_progress)
+    monkeypatch.setitem(sys.modules, "tqdm", tqdm_module)
+
+    await upsert_all(
+        object(),
+        iter([
+            {"id": "doc-1"},
+            {"id": "doc-2"},
+            {"id": "doc-3"},
+            {"id": "doc-4"},
+        ]),
+        batch_size=2,
+        predicate=lambda batch: False,
+        show_progress=True,
+        progress_total=4,
+        schema={},
+    )
+
+    progress = progress_bars[0]
+    assert progress.total == 4
+    assert progress.updates == [2, 2]
+    assert progress.closed
+
+
+@pytest.mark.asyncio
+async def test_async_upsert_all_progress_works_without_tqdm(monkeypatch):
+    def missing_tqdm(_module_name):
+        raise ImportError("tqdm is not installed")
+
+    monkeypatch.setattr("tpuf_helpers.async_helpers.import_module", missing_tqdm)
+
+    await upsert_all(
+        object(),
+        iter([{"id": "doc-1"}]),
+        batch_size=1,
+        predicate=lambda batch: False,
+        show_progress=True,
+        schema={},
+    )
