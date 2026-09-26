@@ -1,4 +1,5 @@
 from collections.abc import Callable, Iterable, Mapping
+from importlib import import_module
 from itertools import islice
 from typing import Any
 
@@ -59,6 +60,7 @@ def upsert_all(
         [list[dict[str, Any]]], list[dict[str, Any]]
     ] = no_op_enrich,
     force: bool = False,
+    show_progress: bool = False,
     schema: Mapping[str, Any],
     distance_metric: DistanceMetric = "cosine_distance",
 ) -> None:
@@ -73,17 +75,32 @@ def upsert_all(
     if force:
         drop(ns)
 
+    progress: Any | None = None
+    if show_progress:
+        try:
+            tqdm = getattr(import_module("tqdm"), "tqdm")
+        except ImportError:
+            pass
+        else:
+            progress = tqdm()
+
     documents = iter(batches)
-    while batch := list(islice(documents, batch_size)):
-        should_upsert = (
-            predicate(batch)
-            if predicate is not None
-            else not exists(ns, batch[0]["id"])
-        )
-        if should_upsert:
-            batch = enrich_fn(batch)
-            ns.write(
-                upsert_rows=batch,
-                distance_metric=distance_metric,
-                schema=dict(schema),
+    try:
+        while batch := list(islice(documents, batch_size)):
+            should_upsert = (
+                predicate(batch)
+                if predicate is not None
+                else not exists(ns, batch[0]["id"])
             )
+            if should_upsert:
+                batch = enrich_fn(batch)
+                ns.write(
+                    upsert_rows=batch,
+                    distance_metric=distance_metric,
+                    schema=dict(schema),
+                )
+            if progress is not None:
+                progress.update(batch_size)
+    finally:
+        if progress is not None:
+            progress.close()

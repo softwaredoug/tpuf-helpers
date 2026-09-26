@@ -1,3 +1,6 @@
+import sys
+from types import ModuleType
+
 from tpuf_helpers.sync import count, drop, exists, fetch, upsert_all
 
 
@@ -150,3 +153,54 @@ def test_upsert_all_force_drops_existing_documents(test_namespace, test_docs):
     document = fetch(test_namespace, "doc-5")
     assert document is not None
     assert document["text"] == "after force drop"
+
+
+def test_upsert_all_progress_advances_for_skipped_batches(monkeypatch):
+    class FakeProgress:
+        def __init__(self):
+            self.updates = []
+            self.closed = False
+
+        def update(self, amount):
+            self.updates.append(amount)
+
+        def close(self):
+            self.closed = True
+
+    progress = FakeProgress()
+    tqdm_module = ModuleType("tqdm")
+    setattr(tqdm_module, "tqdm", lambda: progress)
+    monkeypatch.setitem(sys.modules, "tqdm", tqdm_module)
+
+    upsert_all(
+        object(),
+        iter([
+            {"id": "doc-1"},
+            {"id": "doc-2"},
+            {"id": "doc-3"},
+            {"id": "doc-4"},
+        ]),
+        batch_size=2,
+        predicate=lambda batch: False,
+        show_progress=True,
+        schema={},
+    )
+
+    assert progress.updates == [2, 2]
+    assert progress.closed
+
+
+def test_upsert_all_progress_works_without_tqdm(monkeypatch):
+    def missing_tqdm(_module_name):
+        raise ImportError("tqdm is not installed")
+
+    monkeypatch.setattr("tpuf_helpers.sync.import_module", missing_tqdm)
+
+    upsert_all(
+        object(),
+        iter([{"id": "doc-1"}]),
+        batch_size=1,
+        predicate=lambda batch: False,
+        show_progress=True,
+        schema={},
+    )
