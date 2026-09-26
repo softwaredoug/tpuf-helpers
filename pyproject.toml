@@ -13,4 +13,8 @@ dev = [
     "flake8",
     "pre-commit>=4.6.2",
     "pyright",
+    "pytest",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
