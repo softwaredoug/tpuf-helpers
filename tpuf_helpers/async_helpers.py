@@ -56,8 +56,7 @@ async def upsert_all(
         [list[dict[str, Any]]], list[dict[str, Any]]
     ] = no_op_enrich,
     force: bool = False,
-    show_progress: bool = False,
-    progress_total: int | None = None,
+    progress_bar_total: int | None = None,
     schema: Mapping[str, Any],
     distance_metric: DistanceMetric = "cosine_distance",
 ) -> None:
@@ -73,13 +72,13 @@ async def upsert_all(
         await drop(ns)
 
     progress: Any | None = None
-    if show_progress:
+    if progress_bar_total is not None:
         try:
             tqdm = getattr(import_module("tqdm"), "tqdm")
         except ImportError:
             pass
         else:
-            progress = tqdm(total=progress_total)
+            progress = tqdm(total=progress_bar_total)
 
     document_iter = iter(documents)
     try:

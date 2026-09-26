@@ -205,8 +205,7 @@ async def test_async_upsert_all_progress_advances_for_skipped_batches(monkeypatc
         ]),
         batch_size=2,
         predicate=lambda batch: False,
-        show_progress=True,
-        progress_total=4,
+        progress_bar_total=4,
         schema={},
     )
 
@@ -228,6 +227,6 @@ async def test_async_upsert_all_progress_works_without_tqdm(monkeypatch):
         iter([{"id": "doc-1"}]),
         batch_size=1,
         predicate=lambda batch: False,
-        show_progress=True,
+        progress_bar_total=1,
         schema={},
     )
