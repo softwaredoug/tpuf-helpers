@@ -1,7 +1,7 @@
 import sys
 from types import ModuleType
 
-from tpuf_helpers.sync import count, drop, exists, fetch, upsert_all
+from tpuf_helpers.sync import count, drop, exists, fetch, fetch_all, upsert_all
 
 
 def test_sync_helpers(test_namespace, test_docs):
@@ -30,6 +30,52 @@ def test_fetch_and_exists_for_missing_document(test_namespace, test_docs):
     assert not exists(test_namespace, "missing")
 
 
+def test_fetch_all_returns_documents_across_pages(test_namespace):
+    documents = [
+        {"id": "doc-1", "text": "first", "category": "one"},
+        {"id": "doc-2", "text": "second", "category": "two"},
+    ]
+    test_namespace.write(upsert_rows=documents)
+
+    rows = list(fetch_all(test_namespace, page_size=1))
+
+    assert [row["id"] for row in rows] == ["doc-1", "doc-2"]
+    assert [row["category"] for row in rows] == ["one", "two"]
+
+
+def test_fetch_all_selects_attributes(test_namespace):
+    documents = [
+        {"id": "doc-1", "text": "first", "category": "one"},
+        {"id": "doc-2", "text": "second", "category": "two"},
+    ]
+    test_namespace.write(upsert_rows=documents)
+
+    rows = list(fetch_all(test_namespace, include_attributes=["text"], page_size=1))
+
+    assert [row["text"] for row in rows] == ["first", "second"]
+    assert all(
+        row.model_extra is not None and "category" not in row.model_extra
+        for row in rows
+    )
+
+
+def test_fetch_all_returns_nothing_for_missing_namespace(test_namespace):
+    assert list(fetch_all(test_namespace)) == []
+
+
+def test_fetch_all_stops_at_page_boundary_for_limit(test_namespace):
+    test_namespace.write(
+        upsert_rows=[
+            {"id": f"doc-{index}", "text": f"document {index}"}
+            for index in range(1, 5)
+        ]
+    )
+
+    rows = list(fetch_all(test_namespace, page_size=2, limit=1))
+
+    assert [row["id"] for row in rows] == ["doc-1", "doc-2"]
+
+
 def test_upsert_all_batches_documents(test_namespace, test_docs):
     documents = [
         {**test_docs[0], "vector": [0.1, 0.2]},
@@ -43,6 +89,27 @@ def test_upsert_all_batches_documents(test_namespace, test_docs):
     )
 
     assert count(test_namespace) == len(test_docs)
+
+
+def test_upsert_all_stops_at_batch_boundary_for_limit(test_namespace, test_docs):
+    documents = [
+        {**test_docs[0], "vector": [0.1, 0.2]},
+        {**test_docs[1], "vector": [0.2, 0.3]},
+        {"id": "doc-3", "text": "third test document", "vector": [0.3, 0.4]},
+    ]
+
+    upsert_all(
+        test_namespace,
+        iter(documents),
+        batch_size=2,
+        limit=1,
+        schema={"text": {"type": "string"}},
+    )
+
+    assert count(test_namespace) == 2
+    assert exists(test_namespace, "doc-1")
+    assert exists(test_namespace, "doc-2")
+    assert not exists(test_namespace, "doc-3")
 
 
 def test_upsert_all_skips_batch_when_first_document_exists(

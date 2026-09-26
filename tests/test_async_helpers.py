@@ -55,6 +55,30 @@ async def test_async_upsert_all_batches_documents(async_namespace, test_docs):
 
 
 @pytest.mark.asyncio
+async def test_async_upsert_all_stops_at_batch_boundary_for_limit(
+    async_namespace, test_docs
+):
+    documents = [
+        {**test_docs[0], "vector": [0.1, 0.2]},
+        {**test_docs[1], "vector": [0.2, 0.3]},
+        {"id": "doc-3", "text": "third test document", "vector": [0.3, 0.4]},
+    ]
+
+    await upsert_all(
+        async_namespace,
+        iter(documents),
+        batch_size=2,
+        limit=1,
+        schema={"text": {"type": "string"}},
+    )
+
+    assert await count(async_namespace) == 2
+    assert await exists(async_namespace, "doc-1")
+    assert await exists(async_namespace, "doc-2")
+    assert not await exists(async_namespace, "doc-3")
+
+
+@pytest.mark.asyncio
 async def test_async_upsert_all_skips_batch_when_first_document_exists(
     async_namespace, test_docs
 ):

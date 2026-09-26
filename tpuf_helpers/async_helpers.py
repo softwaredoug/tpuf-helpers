@@ -57,6 +57,7 @@ async def upsert_all(
     ] = no_op_enrich,
     force: bool = False,
     progress_bar_total: int | None = None,
+    limit: int | None = None,
     schema: Mapping[str, Any],
     distance_metric: DistanceMetric = "cosine_distance",
 ) -> None:
@@ -67,6 +68,8 @@ async def upsert_all(
     """
     if batch_size <= 0:
         raise ValueError("batch_size must be greater than zero")
+    if limit is not None and limit < 0:
+        raise ValueError("limit must be non-negative")
 
     if force:
         await drop(ns)
@@ -81,8 +84,13 @@ async def upsert_all(
             progress = tqdm(total=progress_bar_total)
 
     document_iter = iter(documents)
+    documents_processed = 0
     try:
-        while batch := list(islice(document_iter, batch_size)):
+        while limit is None or documents_processed < limit:
+            batch = list(islice(document_iter, batch_size))
+            if not batch:
+                break
+            batch_count = len(batch)
             should_upsert = (
                 predicate(batch)
                 if predicate is not None
@@ -95,6 +103,7 @@ async def upsert_all(
                     distance_metric=distance_metric,
                     schema=dict(schema),
                 )
+            documents_processed += batch_count
             if progress is not None:
                 progress.update(batch_size)
     finally:
