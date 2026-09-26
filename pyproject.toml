@@ -1,0 +1,16 @@
+[project]
+name = "tpuf-helpers"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "turbopuffer>=2.10.2",
+]
+
+[dependency-groups]
+dev = [
+    "flake8",
+    "pre-commit>=4.6.2",
+    "pyright",
+]
