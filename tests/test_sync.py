@@ -33,49 +33,61 @@ def test_upsert_all(test_namespace, test_docs):
         {**test_docs[0], "vector": [0.1, 0.2]},
         {**test_docs[1], "vector": [0.2, 0.3]},
     ]
-    batches = iter([[batch_docs[0]], [batch_docs[1]]])
-
-    upsert_all(test_namespace, batches, schema=schema)
+    upsert_all(test_namespace, iter(batch_docs), batch_size=2, schema=schema)
 
     assert count(test_namespace) == len(test_docs)
 
-    changed_doc = [
-        {"id": "doc-1", "text": "should be skipped", "vector": [0.3, 0.4]}
-    ]
-    upsert_all(test_namespace, iter([changed_doc]), schema=schema)
+    changed_doc = {
+        "id": "doc-1", "text": "should be skipped", "vector": [0.3, 0.4]
+    }
+    upsert_all(test_namespace, iter([changed_doc]), batch_size=1, schema=schema)
     document = fetch(test_namespace, "doc-1")
     assert document is not None
     assert document["text"] == "first test document"
 
-    custom_batches = [
-        [
-            {
-                "id": "doc-3",
-                "text": "selected by predicate",
-                "vector": [0.4, 0.5],
-            }
-        ],
-        [
-            {
-                "id": "doc-4",
-                "text": "skipped by predicate",
-                "vector": [0.5, 0.6],
-            }
-        ],
+    custom_documents = [
+        {
+            "id": "doc-3",
+            "text": "selected by predicate",
+            "vector": [0.4, 0.5],
+        },
+        {
+            "id": "doc-4",
+            "text": "skipped by predicate",
+            "vector": [0.5, 0.6],
+        },
     ]
+    enriched_ids = []
+
+    def enrich(batch):
+        enriched_ids.extend(doc["id"] for doc in batch)
+        return [{**doc, "text": f'{doc["text"]} (enriched)'} for doc in batch]
+
     upsert_all(
         test_namespace,
-        iter(custom_batches),
+        iter(custom_documents),
+        batch_size=1,
         predicate=lambda batch: batch[0]["id"] == "doc-3",
+        enrich_fn=enrich,
         schema=schema,
     )
     assert exists(test_namespace, "doc-3")
     assert not exists(test_namespace, "doc-4")
+    assert enriched_ids == ["doc-3"]
+    enriched_doc = fetch(test_namespace, "doc-3")
+    assert enriched_doc is not None
+    assert enriched_doc["text"] == "selected by predicate (enriched)"
 
-    forced_doc = [
-        {"id": "doc-5", "text": "after force drop", "vector": [0.6, 0.7]}
-    ]
-    upsert_all(test_namespace, iter([forced_doc]), force=True, schema=schema)
+    forced_doc = {
+        "id": "doc-5", "text": "after force drop", "vector": [0.6, 0.7]
+    }
+    upsert_all(
+        test_namespace,
+        iter([forced_doc]),
+        batch_size=1,
+        force=True,
+        schema=schema,
+    )
     assert count(test_namespace) == 1
     document = fetch(test_namespace, "doc-5")
     assert document is not None

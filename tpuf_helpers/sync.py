@@ -1,4 +1,5 @@
 from collections.abc import Callable, Iterable, Mapping
+from itertools import islice
 from typing import Any
 
 from turbopuffer import NotFoundError
@@ -43,33 +44,44 @@ def drop(ns):
         pass
 
 
+def no_op_enrich(batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return a batch unchanged when no enrichment is required."""
+    return batch
+
+
 def upsert_all(
     ns,
-    batches: Iterable[list[dict[str, Any]]],
+    batches: Iterable[dict[str, Any]],
+    batch_size: int,
     *,
     predicate: Callable[[list[dict[str, Any]]], bool] | None = None,
+    enrich_fn: Callable[
+        [list[dict[str, Any]]], list[dict[str, Any]]
+    ] = no_op_enrich,
     force: bool = False,
     schema: Mapping[str, Any],
     distance_metric: DistanceMetric = "cosine_distance",
 ) -> None:
-    """Upsert batches that pass the predicate into a namespace.
+    """Batch and upsert documents that pass the predicate into a namespace.
 
     By default, a batch is upserted only when its first document ID does not
     already exist in the namespace.
     """
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
+
     if force:
         drop(ns)
 
-    for batch in batches:
-        if not batch:
-            continue
-
+    documents = iter(batches)
+    while batch := list(islice(documents, batch_size)):
         should_upsert = (
             predicate(batch)
             if predicate is not None
             else not exists(ns, batch[0]["id"])
         )
         if should_upsert:
+            batch = enrich_fn(batch)
             ns.write(
                 upsert_rows=batch,
                 distance_metric=distance_metric,
