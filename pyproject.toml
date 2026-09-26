@@ -14,7 +14,9 @@ dev = [
     "pre-commit>=4.6.2",
     "pyright",
     "pytest",
+    "pytest-asyncio",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+asyncio_mode = "auto"
