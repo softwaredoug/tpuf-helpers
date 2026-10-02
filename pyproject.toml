@@ -1,12 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "tpuf-helpers"
 version = "0.1.0"
-description = "Add your description here"
+description = "Turbopuffer helpers and command-line tools"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "turbopuffer>=2.10.2",
 ]
+
+[project.scripts]
+tpuf = "tpuf_helpers.cli:main"
 
 [dependency-groups]
 dev = [
@@ -20,3 +27,6 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 asyncio_mode = "auto"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tpuf_helpers"]
