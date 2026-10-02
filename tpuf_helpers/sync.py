@@ -4,7 +4,32 @@ from itertools import islice
 from typing import Any
 
 from turbopuffer import NotFoundError
-from turbopuffer.types import DistanceMetric, IncludeAttributesParam, Row
+from turbopuffer.types import (
+    DistanceMetric,
+    IncludeAttributesParam,
+    NamespaceSummary,
+    Row,
+)
+
+
+def ls(
+    client,
+    *,
+    prefix: str | None = None,
+    page_size: int | None = None,
+) -> Iterator[NamespaceSummary]:
+    """Iterate through namespaces, optionally filtered by prefix.
+
+    The API's paginated iterator is consumed lazily, so this yields namespaces
+    across all pages without loading the full listing into memory.
+    """
+    options: dict[str, Any] = {}
+    if prefix is not None:
+        options["prefix"] = prefix
+    if page_size is not None:
+        options["page_size"] = page_size
+
+    yield from client.namespaces(**options)
 
 
 def fetch(ns, doc_id: str) -> Row | None:

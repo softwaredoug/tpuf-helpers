@@ -1,7 +1,65 @@
 import sys
 from types import ModuleType
+from uuid import uuid4
 
-from tpuf_helpers.sync import count, drop, exists, fetch, fetch_all, upsert_all
+from tpuf_helpers.sync import count, drop, exists, fetch, fetch_all, ls, upsert_all
+
+
+def test_ls_returns_empty_for_unmatched_prefix(tpuf_client):
+    prefix = f"test-tpuf-helpers-ls-no-match-{uuid4().hex}"
+
+    assert list(ls(tpuf_client, prefix=prefix)) == []
+
+
+def test_ls_lists_all_namespaces_when_prefix_is_omitted():
+    expected = [object(), object()]
+
+    class ClientStub:
+        def __init__(self):
+            self.options = None
+
+        def namespaces(self, **options):
+            self.options = options
+            return iter(expected)
+
+    client = ClientStub()
+
+    assert list(ls(client)) == expected
+    assert client.options == {}
+
+
+def test_ls_passes_listing_options_to_client():
+    class ClientStub:
+        def __init__(self):
+            self.options = None
+
+        def namespaces(self, **options):
+            self.options = options
+            return iter(())
+
+    client = ClientStub()
+
+    assert list(ls(client, prefix="test-data", page_size=1)) == []
+    assert client.options == {"prefix": "test-data", "page_size": 1}
+
+
+def test_ls_filters_by_prefix_and_iterates_all_pages(tpuf_client):
+    prefix = f"test-tpuf-helpers-ls-{uuid4().hex}"
+    names = [prefix, f"{prefix}-child"]
+    namespaces = [tpuf_client.namespace(name) for name in names]
+
+    try:
+        for namespace in namespaces:
+            namespace.write(upsert_rows=[{"id": "doc-1"}])
+
+        # A one-item page forces the client iterator to follow its cursor.
+        listed = list(ls(tpuf_client, prefix=prefix, page_size=1))
+    finally:
+        for namespace in namespaces:
+            drop(namespace)
+
+    # Don't assert service ordering: only membership and prefix behavior matter.
+    assert {namespace.id for namespace in listed} == set(names)
 
 
 def test_sync_helpers(test_namespace, test_docs):
